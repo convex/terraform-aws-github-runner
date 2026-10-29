@@ -2,8 +2,8 @@ import { Octokit } from '@octokit/rest';
 import moment from 'moment-timezone';
 import * as nock from 'nock';
 
-import { createRunners } from '@aws-github-runner/runner-providers/aws/ec2/control-plane/runner-config';
-import { listEC2Runners } from '@aws-github-runner/runner-providers/aws/ec2/control-plane/runners';
+import { createRunners } from '@aws-github-runner/compute-providers/aws/ec2/control-plane/runner-config';
+import { listEC2Runners } from '@aws-github-runner/compute-providers/aws/ec2/control-plane/runners';
 import * as ghAuth from '../github/auth';
 import { getGitHubEnterpriseApiUrl } from '../scale-runners/github-runner';
 import { adjust } from './pool';
@@ -26,7 +26,7 @@ vi.mock('@octokit/rest', () => ({
   }),
 }));
 
-vi.mock('@aws-github-runner/runner-providers/aws/ec2/control-plane/runners', async () => ({
+vi.mock('@aws-github-runner/compute-providers/aws/ec2/control-plane/runners', async () => ({
   listEC2Runners: vi.fn(),
   // Include any other functions from the module that might be used
   bootTimeExceeded: vi.fn(),
@@ -35,10 +35,13 @@ vi.mock('./../github/auth', async () => ({
   createGithubAppAuth: vi.fn(),
   createGithubInstallationAuth: vi.fn(),
   createOctokitClient: vi.fn(),
+  getStoredInstallationId: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@aws-github-runner/runner-providers/aws/ec2/control-plane/runner-config', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@aws-github-runner/runner-providers/aws/ec2/control-plane/runner-config')>()),
+vi.mock('@aws-github-runner/compute-providers/aws/ec2/control-plane/runner-config', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@aws-github-runner/compute-providers/aws/ec2/control-plane/runner-config')
+  >()),
   createRunners: vi.fn(),
 }));
 
@@ -64,25 +67,25 @@ const MINIMUM_TIME_RUNNING = 15;
 
 const ec2InstancesRegistered = [
   {
-    instanceId: 'i-1-idle',
+    id: 'i-1-idle',
     launchTime: new Date(),
     type: 'Org',
     owner: ORG,
   },
   {
-    instanceId: 'i-2-busy',
+    id: 'i-2-busy',
     launchTime: new Date(),
     type: 'Org',
     owner: ORG,
   },
   {
-    instanceId: 'i-3-offline',
+    id: 'i-3-offline',
     launchTime: new Date(),
     type: 'Org',
     owner: ORG,
   },
   {
-    instanceId: 'i-4-idle-older-than-minimum-time-running',
+    id: 'i-4-idle-older-than-minimum-time-running',
     launchTime: moment(new Date())
       .subtract(MINIMUM_TIME_RUNNING + 3, 'minutes')
       .toDate(),
@@ -176,6 +179,7 @@ beforeEach(() => {
     token: 'token',
     appId: 1,
     expiresAt: 'some-date',
+    appIndex: 0,
   });
   mockedInstallationAuth.mockResolvedValue({
     type: 'token',
@@ -244,7 +248,7 @@ describe('Test simple pool.', () => {
 
     it('Rejects unsupported pool provider types.', async () => {
       await expect(adjust({ poolSize: 10, type: 'microvm' })).rejects.toThrow(
-        "Unsupported runner provider type 'microvm'",
+        "Unsupported compute provider type 'microvm'",
       );
       expect(mockListRunners).not.toHaveBeenCalled();
     });
@@ -258,7 +262,7 @@ describe('Test simple pool.', () => {
       mockListRunners.mockImplementation(async () => [
         ...ec2InstancesRegistered,
         {
-          instanceId: 'i-4-still-booting',
+          id: 'i-4-still-booting',
           launchTime: moment(new Date())
             .subtract(MINIMUM_TIME_RUNNING - 3, 'minutes')
             .toDate(),
@@ -266,7 +270,7 @@ describe('Test simple pool.', () => {
           owner: ORG,
         },
         {
-          instanceId: 'i-5-orphan',
+          id: 'i-5-orphan',
           launchTime: moment(new Date())
             .subtract(MINIMUM_TIME_RUNNING + 3, 'minutes')
             .toDate(),
@@ -289,7 +293,7 @@ describe('Test simple pool.', () => {
       mockListRunners.mockImplementation(async () => [
         ...ec2InstancesRegistered,
         {
-          instanceId: 'i-4-still-booting',
+          id: 'i-4-still-booting',
           launchTime: moment(new Date())
             .subtract(MINIMUM_TIME_RUNNING - 3, 'minutes')
             .toDate(),
@@ -297,7 +301,7 @@ describe('Test simple pool.', () => {
           owner: ORG,
         },
         {
-          instanceId: 'i-5-orphan',
+          id: 'i-5-orphan',
           launchTime: moment(new Date())
             .subtract(MINIMUM_TIME_RUNNING + 3, 'minutes')
             .toDate(),
@@ -386,13 +390,13 @@ describe('Test simple pool.', () => {
       mockListRunners.mockImplementation(async () => [
         ...ec2InstancesRegistered,
         {
-          instanceId: 'i-5-idle',
+          id: 'i-5-idle',
           launchTime: new Date(),
           type: 'Org',
           owner: ORG,
         },
         {
-          instanceId: 'i-6-idle',
+          id: 'i-6-idle',
           launchTime: new Date(),
           type: 'Org',
           owner: ORG,
@@ -497,6 +501,70 @@ describe('Test simple pool.', () => {
         expect.anything(),
         expect.anything(),
         2,
+        expect.anything(),
+        expect.anything(),
+        'pool-lambda',
+      );
+    });
+  });
+
+  describe('Multi-app round-robin', () => {
+    beforeEach(() => {
+      (getGitHubEnterpriseApiUrl as ReturnType<typeof vi.fn>).mockReturnValue({
+        ghesApiUrl: '',
+        ghesBaseUrl: '',
+      });
+    });
+
+    it('passes the same appIndex to createGithubInstallationAuth', async () => {
+      mockedAppAuth.mockResolvedValue({
+        type: 'app',
+        token: 'token',
+        appId: 42,
+        expiresAt: 'some-date',
+        appIndex: 1,
+      });
+
+      await adjust({ poolSize: 3 });
+
+      expect(mockedInstallationAuth).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(String),
+        1, // appIndex must match the one from createGithubAppAuth
+      );
+    });
+
+    it('looks up installationId using the selected app JWT', async () => {
+      mockedAppAuth.mockResolvedValue({
+        type: 'app',
+        token: 'app-token-for-selected-app',
+        appId: 42,
+        expiresAt: 'some-date',
+        appIndex: 1,
+      });
+
+      await adjust({ poolSize: 3 });
+
+      // Should look up installationId via the API
+      expect(mockOctokit.apps.getOrgInstallation).toHaveBeenCalledWith({ org: ORG });
+    });
+
+    it('passes appIndex to createRunners so rate-limit metrics are attributed to the correct app', async () => {
+      mockedAppAuth.mockResolvedValue({
+        type: 'app',
+        token: 'token',
+        appId: 42,
+        expiresAt: 'some-date',
+        appIndex: 2,
+      });
+
+      await adjust({ poolSize: 3 });
+
+      expect(createRunners).toHaveBeenCalledWith(
+        // appIndex must match the one returned by createGithubAppAuth
+        expect.objectContaining({ appIndex: 2 }),
+        expect.anything(),
+        expect.any(Number),
         expect.anything(),
         expect.anything(),
         'pool-lambda',

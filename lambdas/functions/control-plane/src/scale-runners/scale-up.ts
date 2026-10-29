@@ -1,5 +1,5 @@
 import { addPersistentContextToChildLogger, createChildLogger } from '@aws-github-runner/aws-powertools-util';
-import { resolveRunnerProviderType } from '@aws-github-runner/runner-providers/provider-types';
+import { resolveComputeProviderType } from '@aws-github-runner/compute-providers/provider-types';
 import { Octokit } from '@octokit/rest';
 import yn from 'yn';
 
@@ -14,12 +14,12 @@ import {
   validateSsmParameterStoreTags,
 } from './github-runner';
 import { publishRetryMessage } from './job-retry';
-import type { CreateScaleUpRunnersResult } from './scale-up-provider';
 import type {
   ActionRequestMessage,
   ActionRequestMessageRetry,
   ActionRequestMessageSQS,
   CreateGitHubRunnerConfig,
+  CreateRunnerResult,
 } from './types';
 
 const logger = createChildLogger('scale-up');
@@ -38,30 +38,35 @@ async function createGithubInstallationClient(
   enableOrgLevel: boolean,
   payload: ActionRequestMessage,
   ghesApiUrl: string,
+  appIndex?: number,
 ): Promise<Octokit> {
-  let installationId = await getInstallationId(githubAppClient, enableOrgLevel, payload);
+  const installationId = await getInstallationId(githubAppClient, enableOrgLevel, payload, appIndex);
 
   try {
-    const ghAuth = await createGithubInstallationAuth(installationId, ghesApiUrl);
+    const ghAuth = await createGithubInstallationAuth(installationId, ghesApiUrl, appIndex);
     return await createOctokitClient(ghAuth.token, ghesApiUrl);
   } catch (error) {
-    if (payload.installationId === 0 || getErrorStatus(error) !== 404) {
+    // The installation id can be stale when it was reused from the webhook payload or from the
+    // pre-configured per-app value while the app was uninstalled and reinstalled. Re-resolve the
+    // installation via the API once and retry with the same app before giving up.
+    if (getErrorStatus(error) !== 404) {
       throw error;
     }
 
-    installationId = await resolveInstallationId(githubAppClient, enableOrgLevel, payload);
-    if (installationId === payload.installationId) {
+    const resolvedInstallationId = await resolveInstallationId(githubAppClient, enableOrgLevel, payload);
+    if (resolvedInstallationId === installationId) {
       throw error;
     }
 
-    logger.warn('Retrying GitHub installation auth with installation resolved for current app', {
-      eventInstallationId: payload.installationId,
-      resolvedInstallationId: installationId,
+    logger.warn('Retrying GitHub installation auth with installation resolved for the selected app', {
+      staleInstallationId: installationId,
+      resolvedInstallationId,
+      appIndex,
       repositoryOwner: payload.repositoryOwner,
       repositoryName: payload.repositoryName,
     });
 
-    const ghAuth = await createGithubInstallationAuth(installationId, ghesApiUrl);
+    const ghAuth = await createGithubInstallationAuth(resolvedInstallationId, ghesApiUrl, appIndex);
     return await createOctokitClient(ghAuth.token, ghesApiUrl);
   }
 }
@@ -86,15 +91,18 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
     process.env.SSM_PARAMETER_STORE_TAGS && process.env.SSM_PARAMETER_STORE_TAGS.trim() !== ''
       ? validateSsmParameterStoreTags(process.env.SSM_PARAMETER_STORE_TAGS)
       : [];
-  const runnerProviderType = resolveRunnerProviderType(process.env.RUNNER_PROVIDER_TYPE);
-  const runnerProvider = {
-    ...controlPlaneProviderRegistry.capability(runnerProviderType, 'scaleUp')(),
-    type: runnerProviderType,
+  const computeProviderType = resolveComputeProviderType(process.env.COMPUTE_PROVIDER_TYPE);
+  const computeProvider = {
+    ...controlPlaneProviderRegistry.capability(computeProviderType, 'scaleUp')(),
+    type: computeProviderType,
   };
 
   const { ghesApiUrl, ghesBaseUrl } = getGitHubEnterpriseApiUrl();
 
+  // Select one GitHub App for this entire invocation so every API call in the
+  // batch draws from the same rate-limit bucket.
   const ghAuth = await createGithubAppAuth(undefined, ghesApiUrl);
+  const appIdx = ghAuth.appIndex;
   const githubAppClient = await createOctokitClient(ghAuth.token, ghesApiUrl);
 
   // A map of either owner or owner/repo name to Octokit client, so we use a
@@ -157,6 +165,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
         enableOrgLevel,
         payload,
         ghesApiUrl,
+        appIdx,
       );
 
       entry = {
@@ -193,14 +202,14 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
     let groupRunnerLabels = runnerLabels;
 
     const messageLabels = messages.length > 0 ? (messages[0].labels ?? []) : [];
-    const preparedRunnerGroup = await runnerProvider.prepareGroup(messageLabels);
-    const dynamicLabels = preparedRunnerGroup.runnerLabels;
+    const runnerLabelResolution = await computeProvider.resolveLabelsForRunners(messageLabels);
+    const resolvedRunnerLabels = runnerLabelResolution.runnerLabels;
 
-    if (dynamicLabels.length > 0) {
-      logger.debug('Dynamic labels present on message', { labels: dynamicLabels });
+    if (resolvedRunnerLabels.length > 0) {
+      logger.debug('Dynamic labels present on message', { labels: resolvedRunnerLabels });
       groupRunnerLabels = groupRunnerLabels
-        ? `${groupRunnerLabels},${dynamicLabels.join(',')}`
-        : dynamicLabels.join(',');
+        ? `${groupRunnerLabels},${resolvedRunnerLabels.join(',')}`
+        : resolvedRunnerLabels.join(',');
       logger.debug('Updated runner labels', { runnerLabels: groupRunnerLabels });
     }
 
@@ -218,7 +227,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
       if (enableJobQueuedCheck) {
         let jobQueued = true;
         try {
-          jobQueued = await isJobQueued(githubInstallationClient, message);
+          jobQueued = await isJobQueued(githubInstallationClient, message, appIdx);
         } catch (e) {
           // An unsupported event type is not a transient fault — the check can never
           // succeed for it, so lets skip
@@ -251,7 +260,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
     const currentRunners =
       maximumRunners === -1
         ? 0
-        : await runnerProvider.getCurrentRunners(preparedRunnerGroup.state, { runnerType, runnerOwner });
+        : await computeProvider.getCurrentRunners(runnerLabelResolution.state, { runnerType, runnerOwner });
 
     logger.info('Current runners', {
       currentRunners,
@@ -299,6 +308,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
     });
 
     const githubRunnerConfig: CreateGitHubRunnerConfig = {
+      appIndex: appIdx,
       ephemeral: ephemeralEnabled,
       enableJitConfig,
       ghesBaseUrl,
@@ -313,16 +323,16 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
       ssmParameterStoreTags,
     };
 
-    let createRunnersResult: CreateScaleUpRunnersResult;
+    let createRunnersResult: CreateRunnerResult;
     try {
-      createRunnersResult = await runnerProvider.createRunners({
+      createRunnersResult = await computeProvider.createRunners({
         githubRunnerConfig,
         numberOfRunners: newRunners,
         githubInstallationClient,
-        state: preparedRunnerGroup.state,
+        state: runnerLabelResolution.state,
       });
     } catch (error) {
-      logger.error('Runner provider threw an unexpected error.', {
+      logger.error('Compute provider threw an unexpected error.', {
         error,
         retryable: true,
         failedMessageCount: newRunners,

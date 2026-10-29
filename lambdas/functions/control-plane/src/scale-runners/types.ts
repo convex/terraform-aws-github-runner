@@ -1,8 +1,15 @@
 export type {
   CreateGitHubRunnerConfig,
-  GitHubRunnerType,
+  CreateRunnerResult,
+  CreateScaleUpRunnersInput,
+  CurrentRunnersInput,
   LambdaRunnerSource,
-} from '@aws-github-runner/runner-providers/core';
+  RunnerLabelResolution,
+  RunnerInfo,
+  RunnerType,
+  ScaleDownComputeProvider,
+  ScaleUpComputeProvider,
+} from '@aws-github-runner/compute-providers/core';
 
 export interface RunnerGroup {
   name: string;

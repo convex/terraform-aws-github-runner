@@ -1,14 +1,13 @@
 import type { Octokit } from '@octokit/rest';
 import { beforeEach, vi } from 'vitest';
 
-import { providerTypes } from '../test/runner-provider-contracts/provider-types';
-import { defineScaleUpContractTests } from '../test/runner-provider-contracts/scale-up';
+import { providerTypes } from '../test/compute-provider-contracts/provider-types';
+import { defineScaleUpContractTests } from '../test/compute-provider-contracts/scale-up';
 import * as ghAuth from '../github/auth';
 import { controlPlaneProviderRegistry } from '../control-plane-providers';
 import * as githubRunner from './github-runner';
 import { scaleUp } from './scale-up';
-import type { ScaleUpRunnerProvider } from './scale-up-provider';
-import type { ActionRequestMessageSQS } from './types';
+import type { ActionRequestMessageSQS, ScaleUpComputeProvider } from './types';
 
 vi.mock('../github/auth', () => ({
   createGithubAppAuth: vi.fn(),
@@ -44,14 +43,14 @@ const payloads: ActionRequestMessageSQS[] = [
 
 const cleanEnv = process.env;
 
-const lanes = providerTypes.map((type) => ({
+const computeProviders = providerTypes.map((type) => ({
   provider: {
     type,
-    prepareGroup: vi.fn(),
+    resolveLabelsForRunners: vi.fn(),
     getCurrentRunners: vi.fn(),
     createRunners: vi.fn(),
-  } satisfies ScaleUpRunnerProvider,
-  state: { lane: type },
+  } satisfies ScaleUpComputeProvider,
+  state: { computeProvider: type },
 }));
 
 beforeEach(() => {
@@ -76,9 +75,9 @@ beforeEach(() => {
 });
 
 defineScaleUpContractTests({
+  computeProviders,
   createPayloads: () => structuredClone(payloads),
   githubInstallationClient: githubClient,
-  lanes,
   resolveCapability: mockedResolveCapability,
   scaleUp,
 });
