@@ -180,6 +180,7 @@ module "runners" {
   instance_types                = var.instance_types
   instance_target_capacity_type = var.instance_target_capacity_type
   instance_allocation_strategy  = var.instance_allocation_strategy
+  instance_type_priorities      = var.instance_type_priorities
   instance_max_spot_price       = var.instance_max_spot_price
   block_device_mappings         = var.block_device_mappings
 
@@ -279,6 +280,7 @@ module "runners" {
   pool_lambda_timeout                        = var.pool_lambda_timeout
   pool_runner_owner                          = var.pool_runner_owner
   pool_lambda_reserved_concurrent_executions = var.pool_lambda_reserved_concurrent_executions
+  pool_include_busy_runners                  = var.pool_include_busy_runners
 
   ssm_housekeeper = var.runners_ssm_housekeeper
   ebs_optimized   = var.runners_ebs_optimized
@@ -370,24 +372,30 @@ module "ami_housekeeper" {
 
 locals {
   lambda_instance_termination_watcher = {
-    prefix                    = var.prefix
-    tags                      = local.tags
-    aws_partition             = var.aws_partition
-    architecture              = var.lambda_architecture
-    principals                = var.lambda_principals
-    runtime                   = var.lambda_runtime
-    security_group_ids        = var.lambda_security_group_ids
-    subnet_ids                = var.lambda_subnet_ids
-    lambda_tags               = var.lambda_tags
-    log_level                 = var.log_level
-    log_class                 = var.log_class
-    logging_kms_key_id        = var.logging_kms_key_id
-    logging_retention_in_days = var.logging_retention_in_days
-    role_path                 = var.role_path
-    role_permissions_boundary = var.role_permissions_boundary
-    s3_bucket                 = var.lambda_s3_bucket
-    tracing_config            = var.tracing_config
-    metrics                   = var.metrics
+    prefix                       = var.prefix
+    tags                         = local.tags
+    aws_partition                = var.aws_partition
+    architecture                 = var.lambda_architecture
+    principals                   = var.lambda_principals
+    runtime                      = var.lambda_runtime
+    security_group_ids           = var.lambda_security_group_ids
+    subnet_ids                   = var.lambda_subnet_ids
+    lambda_tags                  = var.lambda_tags
+    log_level                    = var.log_level
+    log_class                    = var.log_class
+    logging_kms_key_id           = var.logging_kms_key_id
+    logging_retention_in_days    = var.logging_retention_in_days
+    role_path                    = var.role_path
+    role_permissions_boundary    = var.role_permissions_boundary
+    s3_bucket                    = var.lambda_s3_bucket
+    tracing_config               = var.tracing_config
+    metrics                      = var.metrics
+    enable_runner_deregistration = var.instance_termination_watcher.enable_runner_deregistration
+    github_app_parameters = var.instance_termination_watcher.enable_runner_deregistration ? {
+      id         = local.github_app_parameters.id
+      key_base64 = local.github_app_parameters.key_base64
+    } : null
+    ghes_url = var.ghes_url
   }
 }
 

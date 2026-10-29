@@ -582,13 +582,19 @@ variable "instance_target_capacity_type" {
 }
 
 variable "instance_allocation_strategy" {
-  description = "The allocation strategy for spot instances. AWS recommends using `price-capacity-optimized` however the AWS default is `lowest-price`."
+  description = "The allocation strategy for creating instances. For spot, AWS recommends `price-capacity-optimized`; for on-demand, use `lowest-price` or `prioritized`. The AWS default is `lowest-price`."
   type        = string
   default     = "lowest-price"
   validation {
-    condition     = contains(["lowest-price", "diversified", "capacity-optimized", "capacity-optimized-prioritized", "price-capacity-optimized"], var.instance_allocation_strategy)
+    condition     = contains(["lowest-price", "diversified", "capacity-optimized", "capacity-optimized-prioritized", "price-capacity-optimized", "prioritized"], var.instance_allocation_strategy)
     error_message = "The instance allocation strategy does not match the allowed values."
   }
+}
+
+variable "instance_type_priorities" {
+  description = "A map of instance type to priority for the `prioritized` and `capacity-optimized-prioritized` allocation strategies. Lower numbers mean higher priority. If not provided, priorities are assigned based on the order of `instance_types`."
+  type        = map(number)
+  default     = null
 }
 
 variable "instance_max_spot_price" {
@@ -841,6 +847,12 @@ variable "pool_config" {
   default = []
 }
 
+variable "pool_include_busy_runners" {
+  description = "Include busy runners in the pool calculation. By default busy runners are not included in the pool."
+  type        = bool
+  default     = false
+}
+
 variable "aws_partition" {
   description = "(optiona) partition in the arn namespace to use if not 'aws'"
   type        = string
@@ -1052,6 +1064,7 @@ variable "instance_termination_watcher" {
 
     `enable`: Enable or disable the spot termination watcher.
     'features': Enable or disable features of the termination watcher.
+    `enable_runner_deregistration`: Enable or disable deregistering the runner from GitHub when its EC2 instance is terminated.
     `memory_size`: Memory size limit in MB of the lambda.
     `s3_key`: S3 key for syncer lambda function. Required if using S3 bucket to specify lambdas.
     `s3_object_version`: S3 object version for syncer lambda function. Useful if S3 versioning is enabled on source bucket.
@@ -1065,11 +1078,12 @@ variable "instance_termination_watcher" {
       enable_spot_termination_handler              = optional(bool, true)
       enable_spot_termination_notification_watcher = optional(bool, true)
     }), {})
-    memory_size       = optional(number, null)
-    s3_key            = optional(string, null)
-    s3_object_version = optional(string, null)
-    timeout           = optional(number, null)
-    zip               = optional(string, null)
+    enable_runner_deregistration = optional(bool, true)
+    memory_size                  = optional(number, null)
+    s3_key                       = optional(string, null)
+    s3_object_version            = optional(string, null)
+    timeout                      = optional(number, null)
+    zip                          = optional(string, null)
   })
   default = {}
 

@@ -12,6 +12,7 @@ module "pool" {
     user_agent                    = var.user_agent
     github_app_parameters         = var.github_app_parameters
     instance_allocation_strategy  = var.instance_allocation_strategy
+    instance_type_priorities      = var.instance_type_priorities
     instance_max_spot_price       = var.instance_max_spot_price
     instance_target_capacity_type = var.instance_target_capacity_type
     instance_types                = var.instance_types
@@ -38,6 +39,7 @@ module "pool" {
       parameter_store_tags           = local.parameter_store_tags
     }
     pool                      = var.pool_config
+    include_busy_runners      = var.pool_include_busy_runners
     role_path                 = local.role_path
     role_permissions_boundary = var.role_permissions_boundary
     runner = {

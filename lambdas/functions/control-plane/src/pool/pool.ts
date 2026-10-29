@@ -36,6 +36,9 @@ export async function adjust(event: PoolEvent): Promise<void> {
   const launchTemplateName = process.env.LAUNCH_TEMPLATE_NAME;
   const instanceMaxSpotPrice = process.env.INSTANCE_MAX_SPOT_PRICE;
   const instanceAllocationStrategy = process.env.INSTANCE_ALLOCATION_STRATEGY || 'lowest-price'; // same as AWS default
+  const instanceTypePriorities = process.env.INSTANCE_TYPE_PRIORITIES
+    ? (JSON.parse(process.env.INSTANCE_TYPE_PRIORITIES) as Record<string, number>)
+    : undefined;
   const runnerOwner = process.env.RUNNER_OWNER;
   const amiIdSsmParameterName = process.env.AMI_ID_SSM_PARAMETER_NAME;
   const tracingEnabled = yn(process.env.POWERTOOLS_TRACE_ENABLED, { default: false });
@@ -50,6 +53,7 @@ export async function adjust(event: PoolEvent): Promise<void> {
   // -1 disables the maximum check, matching the scale-up lambda's semantics. Defaults to unlimited
   // when unset so the pool keeps its previous behavior on stacks that do not provide the variable.
   const maximumRunners = parseInt(process.env.RUNNERS_MAXIMUM_COUNT || '-1');
+  const includeBusyRunners = yn(process.env.INCLUDE_BUSY_RUNNERS, { default: false });
 
   const { ghesApiUrl, ghesBaseUrl } = getGitHubEnterpriseApiUrl();
 
@@ -72,7 +76,7 @@ export async function adjust(event: PoolEvent): Promise<void> {
     statuses: ['running'],
   });
 
-  const numberOfRunnersInPool = calculatePooSize(ec2runners, runnerStatusses);
+  const numberOfRunnersInPool = calculatePooSize(ec2runners, runnerStatusses, includeBusyRunners);
   let topUp = event.poolSize - numberOfRunnersInPool;
 
   // The pool must never push the total number of runners (busy + idle) past the configured maximum.
@@ -110,6 +114,7 @@ export async function adjust(event: PoolEvent): Promise<void> {
       {
         ec2instanceCriteria: {
           instanceTypes,
+          instanceTypePriorities,
           targetCapacityType: instanceTargetCapacityType,
           maxSpotPrice: instanceMaxSpotPrice,
           instanceAllocationStrategy: instanceAllocationStrategy,
@@ -142,12 +147,16 @@ async function getInstallationId(ghesApiUrl: string, org: string): Promise<numbe
   ).data.id;
 }
 
-function calculatePooSize(ec2runners: RunnerList[], runnerStatus: Map<string, RunnerStatus>): number {
+function calculatePooSize(
+  ec2runners: RunnerList[],
+  runnerStatus: Map<string, RunnerStatus>,
+  includeBusyRunners: boolean,
+): number {
   // Runner should be considered idle if it is still booting, or is idle in GitHub
   let numberOfRunnersInPool = 0;
   for (const ec2Instance of ec2runners) {
     if (
-      runnerStatus.get(ec2Instance.instanceId)?.busy === false &&
+      (runnerStatus.get(ec2Instance.instanceId)?.busy === false || includeBusyRunners) &&
       runnerStatus.get(ec2Instance.instanceId)?.status === 'online'
     ) {
       numberOfRunnersInPool++;
