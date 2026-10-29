@@ -27,7 +27,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout with GITHUB Action token
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
@@ -76,18 +76,18 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: 3.x
       - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
-      - uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: mkdocs-material-${{ env.cache_id }}
           path: .cache
