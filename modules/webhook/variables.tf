@@ -28,11 +28,12 @@ variable "runner_matcher_config" {
     arn = string
     id  = string
     matcherConfig = object({
-      labelMatchers          = list(list(string))
-      exactMatch             = bool
-      priority               = optional(number, 999)
-      enableDynamicLabels    = optional(bool, false)
-      ec2DynamicLabelsPolicy = optional(any, null)
+      labelMatchers           = list(list(string))
+      exactMatch              = bool
+      bidirectionalLabelMatch = optional(bool, false)
+      priority                = optional(number, 999)
+      enableDynamicLabels     = optional(bool, false)
+      ec2DynamicLabelsPolicy  = optional(any, null)
     })
   }))
   validation {
@@ -125,6 +126,16 @@ variable "repository_white_list" {
   description = "List of github repository full names (owner/repo_name) that will be allowed to use the github app. Leave empty for no filtering."
   type        = list(string)
   default     = []
+}
+
+variable "queue_selection_strategy" {
+  description = "Strategy used to pick a queue when multiple runner configurations match a job equally well. `first` keeps the historical deterministic behaviour (the first matching queue by priority). `random` spreads jobs across the matching queues to avoid concentrating load on a single one. `all` scales up one runner per matching queue and lets the first to become available take the job (favouring speed over cost; this multiplies instance launches and runner registrations per job)."
+  type        = string
+  default     = "first"
+  validation {
+    condition     = contains(["first", "random", "all"], var.queue_selection_strategy)
+    error_message = "`queue_selection_strategy` value not valid. Valid values are 'first', 'random', 'all'."
+  }
 }
 
 variable "kms_key_arn" {

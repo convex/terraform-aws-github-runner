@@ -609,6 +609,16 @@ variable "repository_white_list" {
   default     = []
 }
 
+variable "queue_selection_strategy" {
+  description = "Strategy used to pick a queue when multiple runner configurations match a job equally well. `first` keeps the historical deterministic behaviour (the first matching queue by priority). `random` spreads jobs across the matching queues to avoid concentrating load on a single one. `all` scales up one runner per matching queue and lets the first to become available take the job (favouring speed over cost; this multiplies instance launches and runner registrations per job)."
+  type        = string
+  default     = "first"
+  validation {
+    condition     = contains(["first", "random", "all"], var.queue_selection_strategy)
+    error_message = "`queue_selection_strategy` value not valid. Valid values are 'first', 'random', 'all'."
+  }
+}
+
 variable "delay_webhook_event" {
   description = "The number of seconds the event accepted by the webhook is invisible on the queue before the scale up lambda will receive the event."
   type        = number
@@ -664,9 +674,15 @@ variable "log_level" {
 }
 
 variable "enable_runner_workflow_job_labels_check_all" {
-  description = "If set to true all labels in the workflow job must match the GitHub labels (os, architecture and `self-hosted`). When false if __any__ label matches it will trigger the webhook."
+  description = "DEPRECATED: Use `enable_runner_bidirectional_label_match` instead. If set to true all labels in the workflow job must match the GitHub labels (os, architecture and `self-hosted`). When false if __any__ label matches it will trigger the webhook. Note: this only checks that workflow labels are a subset of runner labels, not the reverse."
   type        = bool
   default     = true
+}
+
+variable "enable_runner_bidirectional_label_match" {
+  description = "If set to true, the runner labels and workflow job labels must be an exact two-way match (same set, any order, no extras or missing labels). This is stricter than `enable_runner_workflow_job_labels_check_all` which only checks that workflow labels are a subset of runner labels. When false, if __any__ label matches it will trigger the webhook."
+  type        = bool
+  default     = false
 }
 
 variable "matcher_config_parameter_store_tier" {

@@ -114,6 +114,7 @@ module "webhook" {
       matcherConfig : {
         labelMatchers : [local.runner_labels]
         exactMatch : var.enable_runner_workflow_job_labels_check_all
+        bidirectionalLabelMatch : var.enable_runner_bidirectional_label_match
         enableDynamicLabels : var.enable_dynamic_labels
         ec2DynamicLabelsPolicy : var.ec2_dynamic_labels_policy
       }
@@ -143,6 +144,7 @@ module "webhook" {
   role_path                 = var.role_path
   role_permissions_boundary = var.role_permissions_boundary
   repository_white_list     = var.repository_white_list
+  queue_selection_strategy  = var.queue_selection_strategy
 
   lambda_subnet_ids         = var.lambda_subnet_ids
   lambda_security_group_ids = var.lambda_security_group_ids
