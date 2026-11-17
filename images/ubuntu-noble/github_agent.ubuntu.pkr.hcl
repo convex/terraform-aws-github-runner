@@ -278,10 +278,19 @@ EOF
     destination = "/tmp/start-runner.sh"
   }
 
+  provisioner "file" {
+    content     = file("${path.root}/../actions-runner-bootstrap.service")
+    destination = "/tmp/actions-runner-bootstrap.service"
+  }
+
   provisioner "shell" {
     inline = [
-      "sudo mv /tmp/start-runner.sh /var/lib/cloud/scripts/per-boot/start-runner.sh",
-      "sudo chmod +x /var/lib/cloud/scripts/per-boot/start-runner.sh",
+      "sudo install -o root -g root -m 0755 /tmp/start-runner.sh /usr/local/bin/start-runner.sh",
+      "rm -f /tmp/start-runner.sh",
+      "sudo install -o root -g root -m 0644 /tmp/actions-runner-bootstrap.service /etc/systemd/system/actions-runner-bootstrap.service",
+      "rm -f /tmp/actions-runner-bootstrap.service",
+      "sudo systemctl daemon-reload",
+      "sudo systemctl enable actions-runner-bootstrap.service",
       "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain ${local.rust_toolchain} --component rustfmt --component clippy"
     ]
   }
