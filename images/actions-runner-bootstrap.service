@@ -1,0 +1,21 @@
+# Start the runner once `cloud-init.service` (root volume resize, /etc/hosts)
+# and `network-online.target` are up, running in parallel with `docker.service`
+# while `docker.socket` already buffers connections on `/run/docker.sock`.
+# `OOMPolicy=continue` keeps `Runner.Worker` alive to report child OOM kills.
+[Unit]
+Description=Bootstrap and run GitHub Actions runner
+Wants=network-online.target nss-lookup.target docker.service
+After=cloud-init.service network-online.target nss-lookup.target systemd-user-sessions.service docker.socket
+ConditionPathExists=/usr/local/bin/start-runner.sh
+
+[Service]
+Type=simple
+Environment="HOME=/root"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/aws/amazon-cloudwatch-agent/bin"
+ExecStart=/usr/local/bin/start-runner.sh
+KillMode=process
+OOMPolicy=continue
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target
